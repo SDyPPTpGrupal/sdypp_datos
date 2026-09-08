@@ -1,0 +1,7 @@
+# La contraseña de la base.
+.env
+.env.*
+!.env.example
+
+# redis.conf + la contraseña, generado por levantar.sh en cada arranque.
+redis.local.conf
