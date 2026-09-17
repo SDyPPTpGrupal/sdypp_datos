@@ -49,8 +49,17 @@ direccion_tailscale() {
         return
     fi
     # `tailscale ip -4` puede devolver más de una línea si hay varias cuentas.
-    local ip
-    ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+    local ip=""
+    if command -v tailscale >/dev/null 2>&1; then
+        ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+    fi
+    if [[ -z "$ip" ]] && command -v tailscale.exe >/dev/null 2>&1; then
+        ip="$(tailscale.exe ip -4 2>/dev/null | head -1 || true)"
+    fi
+    if [[ -z "$ip" ]] && [[ -f "/c/Program Files/Tailscale/tailscale.exe" ]]; then
+        ip="$("/c/Program Files/Tailscale/tailscale.exe" ip -4 2>/dev/null | head -1 || true)"
+    fi
+
     if [[ -z "$ip" ]]; then
         error "no pude averiguar la IP de Tailscale de esta máquina."
         info  "¿Está corriendo? Probá 'tailscale status'."
@@ -118,11 +127,15 @@ levantar() {
     mkdir -p "$DIR_DATOS"
     docker rm -f "$CONTENEDOR" >/dev/null 2>&1 || true
 
-    # Redis corre con TU uid, no con el que trae la imagen (999). Hace falta
-    # porque el archivo de configuración lleva la contraseña y está en 600: si el
-    # proceso de adentro fuera otro usuario, no podría leerlo, y la única salida
-    # sería abrirle los permisos a todo el mundo.
-    local duenio; duenio="$(id -u):$(id -g)"
+    # Redis corre con TU uid en Linux. En Windows (Git Bash), id -u devuelve
+    # un UID simulado (ej. 197609) inexistente dentro del contenedor, por lo
+    # que se omite --user en Windows para usar el default manejado por Docker Desktop.
+    local -a duenio=()
+    if [[ "$(uname -s)" =~ MINGW|MSYS|CYGWIN ]]; then
+        duenio=()
+    else
+        duenio=(--user "$(id -u):$(id -g)")
+    fi
 
     local -a red=()
     if docker network inspect "$RED_LOCAL" >/dev/null 2>&1; then
@@ -133,7 +146,7 @@ levantar() {
     docker run -d \
         --name "$CONTENEDOR" \
         --restart unless-stopped \
-        --user "$duenio" \
+        "${duenio[@]}" \
         "${red[@]}" \
         -p "$ip:$PUERTO:6379" \
         -v "$configuracion:/etc/redis/redis.conf:ro" \

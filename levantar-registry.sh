@@ -76,8 +76,16 @@ direccion_tailscale() {
     fi
 
     # 2. Le preguntamos al comando 'tailscale' cuál es nuestra IP de versión 4 (IPv4).
-    local ip
-    ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+    local ip=""
+    if command -v tailscale >/dev/null 2>&1; then
+        ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+    fi
+    if [[ -z "$ip" ]] && command -v tailscale.exe >/dev/null 2>&1; then
+        ip="$(tailscale.exe ip -4 2>/dev/null | head -1 || true)"
+    fi
+    if [[ -z "$ip" ]] && [[ -f "/c/Program Files/Tailscale/tailscale.exe" ]]; then
+        ip="$("/c/Program Files/Tailscale/tailscale.exe" ip -4 2>/dev/null | head -1 || true)"
+    fi
 
     # 3. Si no encuentra ninguna IP (porque Tailscale está apagado), detiene el script con error.
     if [[ -z "$ip" ]]; then
@@ -107,15 +115,21 @@ levantar() {
     # Si ya existía un contenedor viejo con el mismo nombre, lo elimina para arrancar de cero.
     docker rm -f "$CONTENEDOR" >/dev/null 2>&1 || true
 
-    # Obtiene identificador de usuario de Linux para que los archivos
-    # guardados no queden bloqueados como propiedad de root.
-    local duenio; duenio="$(id -u):$(id -g)"
+    # Obtiene identificador de usuario de Linux. En Windows (Git Bash), id -u devuelve
+    # un UID simulado (ej. 197609) inexistente dentro del contenedor, por lo que
+    # se omite --user en Windows para usar el usuario por defecto del contenedor.
+    local -a duenio=()
+    if [[ "$(uname -s)" =~ MINGW|MSYS|CYGWIN ]]; then
+        duenio=()
+    else
+        duenio=(--user "$(id -u):$(id -g)")
+    fi
 
     # Orden para crear y ejecutar el contenedor Docker:
     docker run -d \
         --name "$CONTENEDOR" \
         --restart unless-stopped \
-        --user "$duenio" \
+        "${duenio[@]}" \
         -p "$ip:$PUERTO:5000" \
         -v "$DIR_REGISTRY:/var/lib/registry" \
         -e REGISTRY_STORAGE_DELETE_ENABLED=true \

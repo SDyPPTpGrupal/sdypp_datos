@@ -21,6 +21,37 @@ Corre en la **máquina de Nomico (`100.78.246.64`)**, en contenedores Docker ind
 
 ### Máquina de Datos Completa (Redis + Registry al mismo tiempo)
 
+**Opción Ejecutable Directo / Batch (Windows CMD o Doble Clic):**
+
+```cmd
+levantar-datos.bat          :: Levanta Redis y Registry usando dist\datos.exe o Python
+levantar-datos.bat estado   :: Diagnóstico detallado
+levantar-datos.bat bajar    :: Apaga ambos contenedores
+levantar-datos.bat limpiar  :: Limpieza del Registry
+```
+
+*(También disponibles: `levantar-redis.bat`, `levantar-registry.bat`, y `levantar.bat`).*
+
+**Opción Multiplataforma recomendada (Python nativo):**
+
+```bash
+python datos.py            # Levanta Redis y Registry en un solo paso
+python datos.py estado     # Estado detallado de ambos servicios
+python datos.py bajar      # Apaga ambos contenedores sin borrar datos
+python datos.py limpiar    # Limpieza de capas huérfanas en el Registry
+```
+
+*Subcomandos específicos en Python:*
+```bash
+python datos.py redis [levantar|estado|bajar]
+python datos.py registry [levantar|estado|bajar|limpiar]
+```
+
+**Ejecutable independiente ya generado:**
+El binario autoejecutable de Windows se encuentra listo en [`dist/datos.exe`](file:///c:/Users/totit/OneDrive/Documentos/UNLu/SD/sdypp_redis/dist/datos.exe). No requiere tener Python instalado en el equipo.
+
+**Opción Shell Script (Linux / Git Bash):**
+
 ```bash
 ./levantar-datos.sh            # Levanta Redis y Registry en un solo paso
 ./levantar-datos.sh estado     # Estado detallado de ambos servicios

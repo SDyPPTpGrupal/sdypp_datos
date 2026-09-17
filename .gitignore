@@ -15,3 +15,6 @@ datos.md
 *datos.md
 
 
+
+# PyInstaller build artifacts
+build/
