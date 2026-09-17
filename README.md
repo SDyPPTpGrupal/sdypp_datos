@@ -19,23 +19,34 @@ Corre en la **máquina de Nomico (`100.78.246.64`)**, en contenedores Docker ind
 
 ## Comandos
 
-### Base de Datos (Redis)
+### Máquina de Datos Completa (Redis + Registry al mismo tiempo)
 
 ```bash
-./levantar.sh            # levantar (o volver a levantar) la base
-./levantar.sh estado     # ¿viva? ¿responde por el tailnet? ¿cuántas personas hay?
-./levantar.sh bajar      # bajar el contenedor sin borrar los datos
+./levantar-datos.sh            # Levanta Redis y Registry en un solo paso
+./levantar-datos.sh estado     # Estado detallado de ambos servicios
+./levantar-datos.sh bajar      # Apaga ambos contenedores sin borrar datos
+./levantar-datos.sh limpiar    # Limpieza de capas huérfanas en el Registry
 ```
+
+### Base de Datos Redis (`sdypp-redis`)
+
+```bash
+./levantar-redis.sh            # Levantar (o volver a levantar) la base Redis
+./levantar-redis.sh estado     # Diagnóstico: ¿viva? ¿cuántas personas hay?
+./levantar-redis.sh bajar      # Bajar el contenedor sin borrar los datos
+```
+
+*(Nota: `./levantar.sh` se mantiene como alias de compatibilidad que redirige a `./levantar-redis.sh`).*
 
 La primera vez genera un `.env` con una contraseña aleatoria y la muestra como `TP_REDIS_URL`. **Esa línea va por Discord a cada casa con réplicas, nunca al repositorio.**
 
-### Registro de Imágenes (Docker Registry)
+### Registro de Imágenes Docker (`sdypp-registry`)
 
 ```bash
-./levantar-registry.sh            # levantar (o volver a levantar) el registry
-./levantar-registry.sh estado     # ¿está vivo? ¿qué imágenes y tags contiene?
-./levantar-registry.sh bajar      # bajar el contenedor sin borrar las capas
-./levantar-registry.sh limpiar    # garbage-collect de capas huérfanas
+./levantar-registry.sh            # Levantar (o volver a levantar) el registry
+./levantar-registry.sh estado     # Diagnóstico: ¿está vivo? ¿qué imágenes/tags contiene?
+./levantar-registry.sh bajar      # Bajar el contenedor sin borrar las capas
+./levantar-registry.sh limpiar    # Garbage-collect de capas huérfanas
 ```
 
 Configuración requerida en `/etc/docker/daemon.json` en las casas y entornos de desarrollo:
