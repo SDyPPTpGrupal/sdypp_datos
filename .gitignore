@@ -18,3 +18,4 @@ datos.md
 
 # PyInstaller build artifacts
 build/
+*.spec
