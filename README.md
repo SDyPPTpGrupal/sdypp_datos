@@ -1,23 +1,24 @@
-# La base compartida — Redis
+# La máquina de Datos — Redis + Registry (`sdypp_datos`)
 
-El estado del servicio. Las réplicas de Python son *stateless*: las personas no
-viven en la memoria de ninguna, viven acá. Eso es lo que hace que un alta la
-pueda atender una casa y la lectura siguiente otra, y que matar una réplica no
-pierda nada.
+Infraestructura de almacenamiento y distribución del servicio. Esta máquina aloja dos servicios centrales:
+
+1. **Redis (`sdypp-redis`):** El estado del servicio. Las réplicas de Python y Java son *stateless*; la información de las personas no vive en la memoria de ninguna réplica, vive acá.
+2. **Registry (`sdypp-registry`):** El registro de imágenes Docker privado (`registry:2`) donde `publicar.sh` sube (`docker push`) las nuevas imágenes y desde donde el CD descarga (`docker pull`) para desplegar en las casas.
 
 ```
-réplica Python (casa-salvador) ─┐
-réplica Python (casa-meizers) ──┼──► sdypp-redis @ casa-tomas:6379
-réplica Java   (…)          ────┘         (por Tailscale)
+                  ┌──► sdypp-redis @ 100.78.246.64:6379 (Estado compartida)
+ réplicas / devs  │
+                  └──► sdypp-registry @ 100.78.246.64:5000 (Imágenes de réplicas)
 ```
 
-**Dónde corre y quién la opera** — el enunciado pide negociarlo y contarlo:
-corre en **la casa de Tomás**, en un contenedor, y la opera Tomás. Se decidió así
-porque la casa de Mateo Nomico, que la iba a hostear, estuvo caída; y porque es
-la casa que ya tiene el balanceador y el CI/CD arriba todo el día, así que es la
-que más disponibilidad real ofrece. **La contracara está abajo, en el SPOF.**
+**Dónde corre y quién la opera:**
+Corre en la **máquina de Nomico (`100.78.246.64`)**, en contenedores Docker independientes. Ambos servicios se publican **únicamente en la IP de Tailscale**.
+
+---
 
 ## Comandos
+
+### Base de Datos (Redis)
 
 ```bash
 ./levantar.sh            # levantar (o volver a levantar) la base
@@ -25,138 +26,75 @@ que más disponibilidad real ofrece. **La contracara está abajo, en el SPOF.**
 ./levantar.sh bajar      # bajar el contenedor sin borrar los datos
 ```
 
-La primera vez genera un `.env` con una contraseña aleatoria y te la muestra una
-vez, ya armada como `TP_REDIS_URL`. **Esa línea va por Discord a cada casa que
-tenga una réplica, y a ningún archivo del repositorio.**
+La primera vez genera un `.env` con una contraseña aleatoria y la muestra como `TP_REDIS_URL`. **Esa línea va por Discord a cada casa con réplicas, nunca al repositorio.**
 
-## Comprobarla
+### Registro de Imágenes (Docker Registry)
+
+```bash
+./levantar-registry.sh            # levantar (o volver a levantar) el registry
+./levantar-registry.sh estado     # ¿está vivo? ¿qué imágenes y tags contiene?
+./levantar-registry.sh bajar      # bajar el contenedor sin borrar las capas
+./levantar-registry.sh limpiar    # garbage-collect de capas huérfanas
+```
+
+Configuración requerida en `/etc/docker/daemon.json` en las casas y entornos de desarrollo:
+```json
+{"insecure-registries": ["100.78.246.64:5000"]}
+```
+
+---
+
+## Comprobar los Servicios
 
 ```bash
 ./levantar.sh estado
+./levantar-registry.sh estado
 ```
 
-Los tres chequeos que importan, y por qué el tercero no es redundante:
-
-| | |
-| :--- | :--- |
-| `ping` desde adentro | el proceso arrancó |
-| `ping` desde el tailnet | **es el que vale**: es por donde la consultan las otras casas. Un PONG desde adentro del contenedor no dice nada sobre si el puerto está publicado donde tiene que estar |
-| `zcard personas:index` | cuántas personas hay guardadas |
-
-Que de verdad no esté abierta al mundo:
+Para verificar que **ningún** servicio esté expuesto públicamente a la LAN o internet:
 
 ```bash
-ss -tln | grep 6379     # tiene que decir 100.101.15.93:6379, NUNCA 0.0.0.0:6379
+ss -tln | grep 6379     # Debe mostrar 100.78.246.64:6379, NUNCA 0.0.0.0:6379
+ss -tln | grep 5000     # Debe mostrar 100.78.246.64:5000, NUNCA 0.0.0.0:5000
 ```
 
-## Decisiones
+---
 
-**Escucha sólo en la IP de Tailscale.** El `-p 100.101.15.93:6379:6379` publica el
-puerto en esa interfaz y en ninguna otra: desde la LAN de casa o desde internet la
-base no existe, ni siquiera para el handshake. Es más fuerte que confiar en la
-contraseña, porque no le da a un atacante ni la oportunidad de intentar. Se
-comprueba, no se afirma:
+## Decisiones de Diseño
+
+### 1. ¿Por qué van juntos en la misma máquina?
+Ambos componentes son servicios de **almacenamiento persistente** con patrones de acceso similares (escribe uno / leen muchos). Comparten los mismos requerimientos de administración: persistencia en disco del host, respaldo de datos y configuración de firewall de red.
+
+### 2. Escucha exclusivamente en la IP de Tailscale
+Tanto `-p 100.78.246.64:6379:6379` como `-p 100.78.246.64:5000:5000` publican los puertos **únicamente** en la interfaz de Tailscale. Desde la LAN local o internet, los puertos no existen ni responden al handshake TCP.
+
+### 3. Registry sin TLS y sin Autenticación
+- **Sin TLS:** El cifrado de extremo a extremo lo provee la capa de red subyacente de Tailscale (WireGuard). Es el mismo principio por el cual gRPC no usa TLS dentro del tailnet.
+- **Sin Autenticación previa:** El registry es accesible solo para los miembros del tailnet. La seguridad del despliegue se garantiza porque el CD descarga imágenes exclusivamente por **digest sha256** (`docker pull imagen@sha256:...`), lo que impide que un `push` malicioso altere lo que ya fue publicado y validado.
+
+### 4. Persistencia en directorios del Host (No volúmenes Docker)
+- Redis: `~/sdypp/redis-datos`
+- Registry: `~/sdypp/registry`
+
+Evita problemas de permisos de UID con imágenes Docker Alpine (`redis:8-alpine` y `registry:2`) y permite consultar/respaldar archivos (como la bitácora AOF de Redis o capas del registry) de forma directa.
+
+### 5. Reglas de Firewall (`ufw route`)
+Los puertos publicados por Docker atraviesan la cadena `FORWARD` de netfilter en lugar de `INPUT`. Por ello se requiere configurar explícitamente:
 
 ```bash
-ss -tln | grep 6379                    # 100.101.15.93:6379, nada más
-bash -c '</dev/tcp/192.168.100.15/6379'  # desde la LAN: conexión rehusada
+sudo ufw route allow in  on tailscale0   # Permitir tráfico entrante a contenedores
+sudo ufw route allow out on tailscale0   # Permitir tráfico saliente de contenedores
+sudo ufw allow in on tailscale0          # Tráfico directo al host (sshd)
 ```
 
-El atajo de poner `-p 6379:6379` publica en **todas** las interfaces y hay que
-evitarlo.
+---
 
-**Un puerto publicado por Docker pasa por `FORWARD`, no por `INPUT`.** Es lo que
-nos costó la tarde del 07/09 y merece quedar escrito, porque el síntoma no apunta
-al firewall. Con `-p`, el paquete no termina en un proceso del host: se le hace
-DNAT hacia la IP del contenedor, así que lo evalúa la cadena `FORWARD`. Con el
-`DEFAULT_FORWARD_POLICY="DROP"` que trae `ufw`, la base quedaba inalcanzable desde
-las otras casas aunque `ss` mostrara el puerto escuchando y `tailscale ping`
-respondiera —el ping lo contesta `tailscaled` en espacio de usuario, sin pasar por
-netfilter—. Las reglas que hacen falta son de `route`, que es como `ufw` llama a
-`FORWARD`:
+## Punto Único de Falla (SPOF)
 
-```bash
-sudo ufw route allow in  on tailscale0   # que entren a los contenedores
-sudo ufw route allow out on tailscale0   # que los contenedores salgan al tailnet
-sudo ufw allow in on tailscale0          # lo que sí es del host: sshd, --network host
-```
+La máquina de **Datos (`100.78.246.64`) es un Punto Único de Falla (SPOF)** del sistema:
 
-Y el diagnóstico que ahorra el rodeo: si `CLIENT LIST` de Redis muestra sólo
-clientes locales y `rejected_connections` está en 0, **el paquete no llegó nunca**.
-No es la contraseña —una contraseña mal puesta se ve como una conexión aceptada y
-un `NOAUTH`— ni es Redis: es la red.
+- Si la máquina cae, Redis no responde y las peticiones a la API devuelven `503`.
+- Las réplicas existentes continuarán corriendo, pero no podrán realizar operaciones de lectura/escritura de personas.
+- El CD no podrá descargar nuevas imágenes del registry para hacer despliegues o conmutaciones.
 
-**Contraseña obligatoria, y fuera del repositorio.** `requirepass` no está en
-`redis.conf` —que sí se versiona y se puede publicar entero— sino en un `.env`
-con permisos 600. `levantar.sh` arma al vuelo un `redis.local.conf` que es la
-concatenación de los dos, y lo monta de sólo lectura. Tampoco va en la línea del
-`docker run`, donde quedaría a la vista de cualquiera que haga `docker inspect` o
-mire la lista de procesos del host.
-
-**Redis corre con el uid del usuario, no con el 999 de la imagen.** Es la
-consecuencia de lo anterior: si la configuración está en 600 y adentro corre otro
-usuario, no la puede leer, y la salida fácil sería aflojarle los permisos al
-archivo que tiene la contraseña
-
-**Los datos van a `~/sdypp/redis-datos`, un directorio del host, no a un volumen
-de Docker.** Con un volumen hay que pelearse con los uid: la imagen trae `/data`
-de su propio usuario y **Docker le vuelve a aplicar ese dueño cada vez que se
-monta mientras el volumen está vacío**, así que un `chown` previo no sobrevive al
-primer arranque. Con un directorio del host el dueño es el que le pongamos. De
-yapa se puede mirar el AOF sin `sudo`, que es lo que hace *verificable* la
-persistencia en vez de sólo afirmarla
-
-```bash
-ls -la ~/sdypp/redis-datos/appendonlydir/
-```
-
-**Persistencia AOF + snapshots.** El enunciado pide que el estado sobreviva al
-reparto entre réplicas; que sobreviva a un reinicio de la base es la otra mitad.
-Sin `appendonly yes`, un `docker restart` borra todas las personas y la demo de
-estado compartido se cae sin que nadie toque una réplica. `appendfsync everysec`
-en vez de `always`: `always` hace un `fsync` por escritura y ahí el alta de una
-persona pasa a costar lo que tarde el disco; `everysec` arriesga como mucho un
-segundo de escrituras contra un corte de luz. Es un intercambio, no un descuido.
-
-**`maxmemory-policy noeviction`.** La decisión más importante del `redis.conf`.
-Con cualquier política de expiración, Redis al llenarse **borra personas viejas
-para hacer lugar, sin avisar**: el servicio seguiría contestando 200 mientras
-pierde datos. Con `noeviction` la escritura falla, la app devuelve `UNAVAILABLE`
-y el problema se ve. Una base de registros no es un caché.
-
-**El log sale por `docker logs`.** A diferencia de las réplicas y del balanceador,
-la base no lleva bitácora propia con el formato del contrato: no atiende
-operaciones del servicio, atiende comandos. Lo que hay que poder cruzar es
-*quién* dio de alta a una persona, y eso está en las otras dos bitácoras.
-
-## El SPOF cambió de lugar (picante 4)
-
-Replicamos las apps y —en la Etapa 3— el balanceador. **La base quedó una sola.**
-Si se cae esta casa, las réplicas siguen vivas y sanas, el balanceador sigue
-repartiendo, y `/personas` devuelve `503` en todas: el servicio queda de pie pero
-inútil. Se puede ver en vivo con `./levantar.sh bajar`.
-
-No se replica igual de fácil que una app stateless, y por eso no lo hicimos:
-
-- Una réplica de app se clona porque no tiene nada que sincronizar. Dos Redis
-  tienen que ponerse de acuerdo sobre **qué escritura pasó antes**, y ahí aparece
-  todo lo que la materia ve después (consenso, quórum, particiones).
-- `redis-server --replicaof` da una réplica de **lectura**, que no es lo que hace
-  falta: el problema es que las escrituras van a un solo lugar. Para failover de
-  escritura hace falta Redis Sentinel (elección de líder) o Cluster (sharding).
-- Y ahí aparece el CAP de Brewer, que el TP 3 pide citar: ante una partición,
-  Sentinel elige **consistencia** y deja de aceptar escrituras. El servicio se
-  frena antes que aceptar dos altas con el mismo `id`. Que es, exactamente, el
-  problema que hoy nos está resolviendo gratis el hecho de que haya una sola.
-
-Lo honesto para la demo es **mostrarlo, no taparlo**: la base es hoy el punto
-único de falla del sistema, y sabemos por qué no lo arreglamos todavía.
-
-## Y una que no es picante pero muerde
-
-La base guarda las personas de **las dos apps**, Java y Python, bajo el mismo
-esquema de claves (`persona:<id>`, `personas:index`, `personas:seq`,
-`legajo:<legajo>`). Ese esquema es tan contrato como el `.proto`: si una de las
-dos implementaciones guardara la misma persona bajo otra clave, las dos
-escribirían en la misma base sin encontrar nunca lo del otro. Está en
-`CONTRATO.md §6` del repo de la app.
+> **Nota para el informe:** Aunque en la Etapa 3 se duplica el balanceador para eliminar el SPOF en el plano de control/datos de entrada, la máquina de Datos permanece como componente centralizado. Para eliminar por completo este SPOF en fases futuras se requeriría replicación activa y consenso en Redis (p.ej. Redis Sentinel / Cluster) y alta disponibilidad en el registro de imágenes.

@@ -5,3 +5,13 @@
 
 # redis.conf + la contraseña, generado por levantar.sh en cada arranque.
 redis.local.conf
+
+# Notas y archivos de datos locales
+00-Comun.md
+00-COMUN.md
+*Comun.md
+*COMUN.md
+datos.md
+*datos.md
+
+
