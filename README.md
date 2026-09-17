@@ -96,7 +96,7 @@ mire la lista de procesos del host.
 **Redis corre con el uid del usuario, no con el 999 de la imagen.** Es la
 consecuencia de lo anterior: si la configuración está en 600 y adentro corre otro
 usuario, no la puede leer, y la salida fácil sería aflojarle los permisos al
-archivo que tiene la contraseña.
+archivo que tiene la contraseña
 
 **Los datos van a `~/sdypp/redis-datos`, un directorio del host, no a un volumen
 de Docker.** Con un volumen hay que pelearse con los uid: la imagen trae `/data`
@@ -104,7 +104,7 @@ de su propio usuario y **Docker le vuelve a aplicar ese dueño cada vez que se
 monta mientras el volumen está vacío**, así que un `chown` previo no sobrevive al
 primer arranque. Con un directorio del host el dueño es el que le pongamos. De
 yapa se puede mirar el AOF sin `sudo`, que es lo que hace *verificable* la
-persistencia en vez de sólo afirmarla:
+persistencia en vez de sólo afirmarla
 
 ```bash
 ls -la ~/sdypp/redis-datos/appendonlydir/
