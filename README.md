@@ -3,12 +3,13 @@
 Infraestructura de almacenamiento y distribución del servicio. Esta máquina aloja dos servicios centrales:
 
 1. **Redis (`sdypp-redis`):** El estado del servicio. Las réplicas de Python y Java son *stateless*; la información de las personas no vive en la memoria de ninguna réplica, vive acá.
-2. **Registry (`sdypp-registry`):** El registro de imágenes Docker privado (`registry:2`) donde `publicar.sh` sube (`docker push`) las nuevas imágenes y desde donde el CD descarga (`docker pull`) para desplegar en las casas.
+2. **Registry (`sdypp-registry`):** El registro de imágenes Docker privado (`registry:2`) donde `publicar.sh` sube (`docker push`) las nuevas imágenes y desde donde las **casas de las réplicas** ejecutan `docker pull` (ordenadas por el CD vía SSH) para descargar sólo la capa que cambió.
 
 ```
-                  ┌──► sdypp-redis @ 100.78.246.64:6379 (Estado compartida)
- réplicas / devs  │
-                  └──► sdypp-registry @ 100.78.246.64:5000 (Imágenes de réplicas)
+ Dev (publicar.sh) ──► docker push ──┐
+                                     ▼
+ Casas (réplicas)  ──► docker pull ──► sdypp-registry @ 100.78.246.64:5000 (Imágenes de réplicas)
+ Casas (réplicas)  ──► TCP 6379 ────► sdypp-redis    @ 100.78.246.64:6379 (Estado compartido)
 ```
 
 **Dónde corre y quién la opera:**
@@ -70,7 +71,7 @@ Tanto `-p 100.78.246.64:6379:6379` como `-p 100.78.246.64:5000:5000` publican lo
 
 ### 3. Registry sin TLS y sin Autenticación
 - **Sin TLS:** El cifrado de extremo a extremo lo provee la capa de red subyacente de Tailscale (WireGuard). Es el mismo principio por el cual gRPC no usa TLS dentro del tailnet.
-- **Sin Autenticación previa:** El registry es accesible solo para los miembros del tailnet. La seguridad del despliegue se garantiza porque el CD descarga imágenes exclusivamente por **digest sha256** (`docker pull imagen@sha256:...`), lo que impide que un `push` malicioso altere lo que ya fue publicado y validado.
+- **Sin Autenticación previa:** El registry es accesible solo para los miembros del tailnet. La seguridad del despliegue se garantiza porque el CD le ordena a las casas hacer `docker pull` de imágenes exclusivamente por **digest sha256** (`docker pull imagen@sha256:...`), lo que impide que un `push` malicioso altere lo que ya fue publicado y validado.
 
 ### 4. Persistencia en directorios del Host (No volúmenes Docker)
 - Redis: `~/sdypp/redis-datos`
